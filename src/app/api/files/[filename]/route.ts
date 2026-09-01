@@ -40,9 +40,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ filename
       return new NextResponse('Not Found or Unauthorized', { status: 404 });
     }
 
-    // Redirect to Vercel Blob URL
+    // Proxy PDF from Vercel Blob (private access requires auth header)
     if (doc.blobUrl) {
-      return NextResponse.redirect(doc.blobUrl);
+      const blobAuthHeaders: HeadersInit = process.env.BLOB_READ_WRITE_TOKEN
+        ? { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` }
+        : {};
+      const blobRes = await fetch(doc.blobUrl, { headers: blobAuthHeaders });
+      if (!blobRes.ok) {
+        return new NextResponse('File not found on storage', { status: 404 });
+      }
+      const buffer = await blobRes.arrayBuffer();
+      return new NextResponse(buffer, {
+        headers: {
+          'Content-Type': doc.mimeType || 'application/pdf',
+          'Content-Disposition': `inline; filename="${doc.title}"`,
+        },
+      });
     }
 
     return new NextResponse('File not found on storage', { status: 404 });

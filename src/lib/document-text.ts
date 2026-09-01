@@ -90,10 +90,15 @@ export async function getOwnedDocumentText(
     throw new DocumentTextError('ไม่พบเอกสารหรือคุณไม่มีสิทธิ์เข้าถึงไฟล์นี้', 404);
   }
 
+  // Build auth headers for private blob access
+  const blobAuthHeaders: HeadersInit = process.env.BLOB_READ_WRITE_TOKEN
+    ? { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` }
+    : {};
+
   // Try to fetch text from Blob (textBlobUrl)
   if (document.textBlobUrl) {
     try {
-      const res = await fetch(document.textBlobUrl);
+      const res = await fetch(document.textBlobUrl, { headers: blobAuthHeaders });
       if (res.ok) {
         const text = normalizeExtractedText(await res.text());
         if (text) return { document, text };
@@ -106,7 +111,7 @@ export async function getOwnedDocumentText(
   // Fallback: fetch PDF from Blob and re-extract text
   if (document.blobUrl) {
     try {
-      const res = await fetch(document.blobUrl);
+      const res = await fetch(document.blobUrl, { headers: blobAuthHeaders });
       if (!res.ok) throw new DocumentTextError('ไม่พบไฟล์ PDF บนเซิร์ฟเวอร์', 404);
       const buffer = Buffer.from(await res.arrayBuffer());
       const text = await extractPdfText(buffer);
