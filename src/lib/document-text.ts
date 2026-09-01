@@ -114,7 +114,7 @@ export async function getOwnedDocumentText(
       // Cache the extracted text back to Blob
       try {
         const textBlob = await put(`${filename}.txt`, text, {
-          access: 'public',
+          access: 'private',
           contentType: 'text/plain; charset=utf-8',
         });
         await prisma.document.update({

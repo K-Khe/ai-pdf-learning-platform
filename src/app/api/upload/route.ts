@@ -78,11 +78,11 @@ export async function POST(req: Request) {
     // Upload file to Vercel Blob
     const [fileBlob, textBlob] = await Promise.all([
       put(fileName, buffer, {
-        access: 'public',
+        access: 'private',
         contentType: isMd ? 'text/markdown' : 'application/pdf',
       }),
       put(`${fileName}.txt`, extractedText, {
-        access: 'public',
+        access: 'private',
         contentType: 'text/plain; charset=utf-8',
       }),
     ]);
