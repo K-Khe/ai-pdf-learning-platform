@@ -1,12 +1,13 @@
 import { PrismaClient } from '@prisma/client';
-import { readFile, writeFile, unlink } from 'fs/promises';
-import { isSafeStoredDocumentFilename, resolveStoredDocumentPaths } from '@/lib/security';
+import { isSafeStoredDocumentFilename } from '@/lib/security';
 import { execFile } from 'child_process';
 import util from 'util';
 import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import pdfParse from 'pdf-parse';
+import { writeFile, unlink } from 'fs/promises';
+import { put } from '@vercel/blob';
 
 const execFileAsync = util.promisify(execFile);
 
@@ -31,7 +32,7 @@ function normalizeExtractedText(text: string) {
 export async function extractPdfText(buffer: Buffer) {
   const tempId = uuidv4();
   const tempPath = path.join(os.tmpdir(), `${tempId}.pdf`);
-  
+
   try {
     await writeFile(tempPath, buffer);
     // MarkItDown preserves headings and tables well when Python is installed.
@@ -89,25 +90,47 @@ export async function getOwnedDocumentText(
     throw new DocumentTextError('ไม่พบเอกสารหรือคุณไม่มีสิทธิ์เข้าถึงไฟล์นี้', 404);
   }
 
-  const { pdfPath, textPath } = resolveStoredDocumentPaths(document.filename);
-
-  try {
-    const text = normalizeExtractedText(await readFile(textPath, 'utf8'));
-    if (text) return { document, text };
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') throw error;
-  }
-
-  try {
-    const text = await extractPdfText(await readFile(pdfPath));
-    await writeFile(textPath, text, 'utf8');
-    return { document, text };
-  } catch (error) {
-    if (error instanceof DocumentTextError) throw error;
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new DocumentTextError('ไม่พบไฟล์ PDF บนเซิร์ฟเวอร์', 404);
+  // Try to fetch text from Blob (textBlobUrl)
+  if (document.textBlobUrl) {
+    try {
+      const res = await fetch(document.textBlobUrl);
+      if (res.ok) {
+        const text = normalizeExtractedText(await res.text());
+        if (text) return { document, text };
+      }
+    } catch (e) {
+      console.warn('Failed to fetch text blob, will re-extract:', e);
     }
-    throw new DocumentTextError('ไม่สามารถอ่านข้อความจาก PDF ได้', 422);
   }
+
+  // Fallback: fetch PDF from Blob and re-extract text
+  if (document.blobUrl) {
+    try {
+      const res = await fetch(document.blobUrl);
+      if (!res.ok) throw new DocumentTextError('ไม่พบไฟล์ PDF บนเซิร์ฟเวอร์', 404);
+      const buffer = Buffer.from(await res.arrayBuffer());
+      const text = await extractPdfText(buffer);
+
+      // Cache the extracted text back to Blob
+      try {
+        const textBlob = await put(`${filename}.txt`, text, {
+          access: 'public',
+          contentType: 'text/plain; charset=utf-8',
+        });
+        await prisma.document.update({
+          where: { id: document.id },
+          data: { textBlobUrl: textBlob.url },
+        });
+      } catch (cacheErr) {
+        console.warn('Failed to cache extracted text to blob:', cacheErr);
+      }
+
+      return { document, text };
+    } catch (error) {
+      if (error instanceof DocumentTextError) throw error;
+      throw new DocumentTextError('ไม่สามารถอ่านข้อความจาก PDF ได้', 422);
+    }
+  }
+
+  throw new DocumentTextError('ไม่พบไฟล์ PDF บนเซิร์ฟเวอร์', 404);
 }

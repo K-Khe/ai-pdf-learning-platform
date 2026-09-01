@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/lib/auth';
 import { PrismaClient } from '@prisma/client';
-import fs from 'fs/promises';
-import { isSafeStoredDocumentFilename, resolveStoredDocumentPaths } from '@/lib/security';
+import { isSafeStoredDocumentFilename } from '@/lib/security';
+import { del } from '@vercel/blob';
 
 const prisma = new PrismaClient();
 
@@ -40,20 +40,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ filename
       return new NextResponse('Not Found or Unauthorized', { status: 404 });
     }
 
-    const { pdfPath } = resolveStoredDocumentPaths(filename);
-    
-    try {
-      const fileBuffer = await fs.readFile(pdfPath);
-      
-      return new NextResponse(fileBuffer, {
-        headers: {
-          'Content-Type': 'application/pdf',
-          'Content-Disposition': `inline; filename="${filename}"`,
-        },
-      });
-    } catch (e) {
-      return new NextResponse('File not found on disk', { status: 404 });
+    // Redirect to Vercel Blob URL
+    if (doc.blobUrl) {
+      return NextResponse.redirect(doc.blobUrl);
     }
+
+    return new NextResponse('File not found on storage', { status: 404 });
 
   } catch (error) {
     console.error('Error fetching file:', error);
@@ -85,22 +77,19 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ filen
       return NextResponse.json({ error: 'Not Found or Unauthorized' }, { status: 404 });
     }
 
-    const { pdfPath, textPath, indexPath } = resolveStoredDocumentPaths(filename);
-
     await prisma.$transaction([
       prisma.message.deleteMany({ where: { filename, userId: doc.userId } }),
       prisma.learningTool.deleteMany({ where: { filename, userId: doc.userId } }),
       prisma.document.delete({ where: { id: doc.id } }),
     ]);
 
-    const cleanupResults = await Promise.allSettled([
-      fs.unlink(pdfPath),
-      fs.unlink(textPath),
-      fs.unlink(indexPath),
-    ]);
-    for (const result of cleanupResults) {
-      if (result.status === 'rejected' && (result.reason as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.error('Failed to remove a stored document artifact:', result.reason);
+    // Delete blobs from Vercel Blob storage
+    const blobsToDelete = [doc.blobUrl, doc.textBlobUrl].filter(Boolean) as string[];
+    if (blobsToDelete.length > 0) {
+      try {
+        await del(blobsToDelete);
+      } catch (e) {
+        console.error('Failed to delete blobs from storage:', e);
       }
     }
 

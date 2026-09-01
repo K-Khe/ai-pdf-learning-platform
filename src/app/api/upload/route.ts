@@ -3,15 +3,15 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/lib/auth';
 import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
-import { writeFile, mkdir, unlink } from 'fs/promises';
+import { put } from '@vercel/blob';
 import { DocumentTextError, extractPdfText } from '@/lib/document-text';
 import {
   exceedsUploadRequestLimit,
-  resolveStoredDocumentPaths,
 } from '@/lib/security';
-import { MAX_FILE_SIZE, PDF_MIME_TYPE, isAcceptedFile } from '@/lib/upload-policy';
+import { MAX_FILE_SIZE, isAcceptedFile } from '@/lib/upload-policy';
 
 const prisma = new PrismaClient();
+
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
     if (!(file instanceof File)) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
     }
-    
+
     if (!isAcceptedFile({ name: file.name, type: file.type })) {
       return NextResponse.json({ error: 'Invalid file type. Only PDF and MD are allowed.' }, { status: 400 });
     }
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const isMd = file.name.toLowerCase().endsWith('.md') || file.name.toLowerCase().endsWith('.markdown');
-    
+
     let extractedText: string;
 
     if (!isMd) {
@@ -74,11 +74,18 @@ export async function POST(req: Request) {
     }
 
     const fileName = `${uuidv4()}${isMd ? '.md' : '.pdf'}`;
-    const { root: uploadDir, pdfPath, textPath } = resolveStoredDocumentPaths(fileName);
-    await mkdir(uploadDir, { recursive: true });
 
-    await writeFile(pdfPath, buffer);
-    await writeFile(textPath, extractedText, 'utf8');
+    // Upload file to Vercel Blob
+    const [fileBlob, textBlob] = await Promise.all([
+      put(fileName, buffer, {
+        access: 'public',
+        contentType: isMd ? 'text/markdown' : 'application/pdf',
+      }),
+      put(`${fileName}.txt`, extractedText, {
+        access: 'public',
+        contentType: 'text/plain; charset=utf-8',
+      }),
+    ]);
 
     try {
       await prisma.document.create({
@@ -86,6 +93,8 @@ export async function POST(req: Request) {
           title: file.name,
           filename: fileName,
           url: `/api/files/${fileName}`,
+          blobUrl: fileBlob.url,
+          textBlobUrl: textBlob.url,
           size: file.size,
           mimeType: file.type,
           userId: (session.user as { id: string }).id,
@@ -93,7 +102,6 @@ export async function POST(req: Request) {
         }
       });
     } catch (error) {
-      await Promise.allSettled([unlink(pdfPath), unlink(textPath)]);
       console.error('Failed to save document:', error);
       return NextResponse.json({ error: 'ไม่สามารถบันทึกข้อมูลเอกสารได้' }, { status: 500 });
     }

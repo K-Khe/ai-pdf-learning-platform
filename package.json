@@ -17,6 +17,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "^5.22.0",
+    "@vercel/blob": "^2.8.0",
     "ai": "^6.0.206",
     "bcryptjs": "^3.0.3",
     "dompurify": "^3.4.14",

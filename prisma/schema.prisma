@@ -67,18 +67,20 @@ model VerificationToken {
 }
 
 model Document {
-  id        String   @id @default(cuid())
-  title     String
-  filename  String
-  url       String
-  mimeType  String   @default("application/pdf")
-  size      Int
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  courseId  String?
-  course    Course?  @relation(fields: [courseId], references: [id], onDelete: SetNull)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  title       String
+  filename    String
+  url         String
+  blobUrl     String?
+  textBlobUrl String?
+  mimeType    String   @default("application/pdf")
+  size        Int
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId    String?
+  course      Course?  @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([courseId])
 }
