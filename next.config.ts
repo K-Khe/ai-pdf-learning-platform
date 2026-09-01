@@ -14,7 +14,7 @@ const cspHeader = `
 `;
 
 const nextConfig: NextConfig = {
-  output: 'standalone',
+  output: process.env.VERCEL ? undefined : 'standalone',
   serverExternalPackages: ['pdf-parse'],
   experimental: {
     // Allows multipart overhead while the route enforces a strict 50MB file limit.
